@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tasky-admin-account
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tasky-cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: tasky-admin-account
+  namespace: default
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tasky-mongodb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tasky-mongodb
+  template:
+    metadata:
+      labels:
+        app: tasky-mongodb
+    spec:
+      serviceAccountName: tasky-admin-account
+      containers:
+      - name: tasky
+        image: 441016944245.dkr.ecr.us-east-1.amazonaws.com/tasky:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: MONGODB_URI
+          valueFrom:
+            configMapKeyRef:
+              name: mongodb-config
+              key: connection-string
+---
+# This ConfigMap will be created dynamically by the deployment script
+# with the MongoDB IP from CloudFormation outputs
