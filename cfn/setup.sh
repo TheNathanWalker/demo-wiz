@@ -1,10 +1,3 @@
-#
-#
-# Set up MongoDB on an Amazon Linux 2023 instance
-# admin username and password are generated randomly
-#
-#
-
 #!/bin/bash
 set -ex
 

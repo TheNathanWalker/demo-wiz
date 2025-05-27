@@ -13,6 +13,8 @@ FROM alpine:3.17.0 as release
 WORKDIR /app
 COPY --from=build  /go/src/tasky/tasky .
 COPY --from=build  /go/src/tasky/assets ./assets
+RUN mkdir -p /app/public
+COPY wizexercise.txt /app/public/
 
 # Install mongosh
 # Add legacy MongoDB repositories and install mongo shell

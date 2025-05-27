@@ -1,13 +1,11 @@
-
 #!/bin/bash
-set -e
 
 # Step 0: Verify CloudFormation stack status
 echo "Step 0: Verifying CloudFormation stack status..."
 STACK_NAME="tasky-demo"
 STACK_STATUS=$(aws cloudformation describe-stacks --stack-name $STACK_NAME --query "Stacks[0].StackStatus" --output text)
 
-if [[ $STACK_STATUS != "CREATE_COMPLETE" && $STACK_STATUS != "UPDATE_COMPLETE" ]]; then
+if [ "$STACK_STATUS" != "CREATE_COMPLETE" ] && [ "$STACK_STATUS" != "UPDATE_COMPLETE" ]; then
   echo "ERROR: Stack is not in a valid state: $STACK_STATUS"
   exit 1
 fi
@@ -20,7 +18,7 @@ MONGO_IP=$(aws cloudformation describe-stacks --stack-name $STACK_NAME --query "
 CLUSTER_NAME=$(aws cloudformation describe-stacks --stack-name $STACK_NAME --query "Stacks[0].Outputs[?OutputKey=='EKSClusterName'].OutputValue" --output text)
 
 # Verify that we got valid outputs
-if [[ -z "$MONGO_IP" || -z "$CLUSTER_NAME" ]]; then
+if [ -z "$MONGO_IP" ] || [ -z "$CLUSTER_NAME" ]; then
   echo "ERROR: Failed to retrieve required outputs from CloudFormation stack"
   echo "MongoDB IP: $MONGO_IP"
   echo "Cluster Name: $CLUSTER_NAME"
@@ -34,18 +32,20 @@ echo "Cluster Name: $CLUSTER_NAME"
 echo "Configuring kubectl..."
 aws eks update-kubeconfig --name $CLUSTER_NAME --region $(aws configure get region)
 
-
 # Create ConfigMap with MongoDB connection string
-echo "Creating ConfigMap with MongoDB connection string..."
+echo "Creating ConfigMap with MongoDB connection string, for administrator $ADMIN_USERNAME.."
 cat <<EOF | kubectl apply -f -
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: mongodb-config
 data:
-  connection-string: "mongodb://adminUser:securePassword@$MONGO_IP:27017/tasky?authSource=admin"
+  connection-string: "mongodb://$ADMIN_USERNAME:$ADMIN_PASSWORD@$MONGO_IP:27017/tasky?authSource=admin"
 EOF
 
+# Check if MongoDB is accessible
+echo "Checking if MongoDB is accessible..."
+kubectl run mongo-test --rm -i --restart=Never --image=mongo:4.4 -- bash -c "timeout 5 mongo $MONGO_IP:27017 --eval 'db.runCommand({ping:1})'" || echo "Warning: MongoDB connectivity test failed. Continuing anyway..."
 
 # Set up AWS Load Balancer Controller
 echo "Setting up AWS Load Balancer Controller..."
@@ -53,7 +53,7 @@ echo "Setting up AWS Load Balancer Controller..."
 # Get AWS account ID
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
-# Create policy
+# Create policy (ignore if it already exists)
 aws iam create-policy --policy-name ALBIngressControllerIAMPolicy --policy-document file://EKS/alb-policy.json || true
 
 # Set up OIDC provider
@@ -106,16 +106,36 @@ kubectl apply -f EKS/tasky-mongodb.yaml
 kubectl apply -f EKS/service.yaml
 kubectl apply -f EKS/ingress.yaml
 
-# Wait for deployment to be ready
-echo "Waiting for deployment to be ready..."
-kubectl rollout status deployment/tasky-mongodb
+# Check if EKS security group allows traffic from ALB
+echo "Checking EKS security group configuration..."
+EKS_SG_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=*eks-cluster-sg*" --query "SecurityGroups[0].GroupId" --output text)
+if [ -n "$EKS_SG_ID" ]; then
+  echo "Adding ingress rule to allow traffic from ALB to EKS nodes on port 8080..."
+  ALB_SG_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=*ALB*" --query "SecurityGroups[0].GroupId" --output text)
+  aws ec2 authorize-security-group-ingress --group-id $EKS_SG_ID --protocol tcp --port 8080 --source-group $ALB_SG_ID || echo "Rule may already exist"
+fi
+
+# Wait for deployment to be ready with a longer timeout
+echo "Waiting for deployment to be ready (this may take a few minutes)..."
+kubectl rollout status deployment/tasky-mongodb --timeout=300s || true
+
+# Check pod status
+echo "Checking pod status..."
+kubectl get pods -l app=tasky-mongodb -o wide
+
+# Check logs from the pod
+echo "Checking pod logs..."
+POD_NAME=$(kubectl get pods -l app=tasky-mongodb -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+if [ -n "$POD_NAME" ]; then
+  kubectl logs $POD_NAME --tail=20
+fi
 
 # Verify ECR registry
 echo "Verifying ECR registry..."
-EXPECTED_REGISTRY="441016944245.dkr.ecr.us-east-1.amazonaws.com/tasky"
+EXPECTED_REGISTRY="$AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/tasky"
 ACTUAL_REGISTRY=$(kubectl get deployment tasky-mongodb -o jsonpath='{.spec.template.spec.containers[0].image}')
 
-if [[ $ACTUAL_REGISTRY == *"$EXPECTED_REGISTRY"* ]]; then
+if [ -n "$(echo $ACTUAL_REGISTRY | grep $EXPECTED_REGISTRY)" ]; then
   echo "Correct ECR registry verified: $ACTUAL_REGISTRY"
 else
   echo "ERROR: Wrong ECR registry detected: $ACTUAL_REGISTRY"
@@ -141,4 +161,11 @@ done
 if [ -z "$ALB_DNS" ]; then
   echo "ALB was not provisioned within the timeout period."
   echo "You can check the status with: kubectl get ingress tasky-ingress"
+fi
+
+echo "Checking ALB target group health..."
+ALB_ARN=$(aws elbv2 describe-load-balancers --query "LoadBalancers[?DNSName=='$ALB_DNS'].LoadBalancerArn" --output text)
+if [ -n "$ALB_ARN" ]; then
+  TG_ARN=$(aws elbv2 describe-target-groups --load-balancer-arn $ALB_ARN --query "TargetGroups[0].TargetGroupArn" --output text)
+  aws elbv2 describe-target-health --target-group-arn $TG_ARN
 fi
