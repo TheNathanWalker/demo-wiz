@@ -1,0 +1,9 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Resources:
+  # Reference existing ECR repository
+  TaskyRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: tasky
+      # Using existing repository, so we don't need to create it
+      # Just defining it here for reference in the CloudFormation stack

@@ -10,7 +10,7 @@ if [ "$STACK_STATUS" != "CREATE_COMPLETE" ] && [ "$STACK_STATUS" != "UPDATE_COMP
   exit 1
 fi
 
-echo "✅ Stack status: $STACK_STATUS"
+echo "Stack status: $STACK_STATUS"
 
 # Get MongoDB private IP from CloudFormation stack
 echo "Getting MongoDB private IP from CloudFormation stack..."

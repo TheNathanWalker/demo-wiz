@@ -1,0 +1,112 @@
+{
+  "schemaVersion": "0.3",
+  "assumeRole": "{{AutomationAssumeRole}}",
+  "parameters": {
+    "VolumeId": {
+      "type": "String",
+      "description": "The ID of the EBS volume to encrypt"
+    },
+    "KmsKeyId": {
+      "type": "String",
+      "description": "The KMS key to use for encryption",
+      "default": "alias/aws/ebs"
+    },
+    "AutomationAssumeRole": {
+      "type": "String",
+      "description": "The ARN of the role that allows Automation to perform the actions on your behalf"
+    }
+  },
+  "mainSteps": [
+    {
+      "name": "describeVolume",
+      "action": "aws:executeAwsApi",
+      "inputs": {
+        "Service": "ec2",
+        "Api": "DescribeVolumes",
+        "VolumeIds": ["{{VolumeId}}"]
+      },
+      "outputs": [
+        {
+          "Name": "availabilityZone",
+          "Selector": "$.Volumes[0].AvailabilityZone"
+        },
+        {
+          "Name": "size",
+          "Selector": "$.Volumes[0].Size"
+        },
+        {
+          "Name": "volumeType",
+          "Selector": "$.Volumes[0].VolumeType"
+        },
+        {
+          "Name": "iops",
+          "Selector": "$.Volumes[0].Iops",
+          "Type": "Integer"
+        },
+        {
+          "Name": "attachments",
+          "Selector": "$.Volumes[0].Attachments"
+        }
+      ]
+    },
+    {
+      "name": "createSnapshot",
+      "action": "aws:executeAwsApi",
+      "inputs": {
+        "Service": "ec2",
+        "Api": "CreateSnapshot",
+        "VolumeId": "{{VolumeId}}",
+        "Description": "Snapshot for encrypting volume {{VolumeId}}"
+      },
+      "outputs": [
+        {
+          "Name": "snapshotId",
+          "Selector": "$.SnapshotId"
+        }
+      ]
+    },
+    {
+      "name": "waitForSnapshot",
+      "action": "aws:waitForAwsResourceProperty",
+      "inputs": {
+        "Service": "ec2",
+        "Api": "DescribeSnapshots",
+        "SnapshotIds": ["{{createSnapshot.snapshotId}}"],
+        "PropertySelector": "$.Snapshots[0].State",
+        "DesiredValues": ["completed"]
+      }
+    },
+    {
+      "name": "createEncryptedVolume",
+      "action": "aws:executeAwsApi",
+      "inputs": {
+        "Service": "ec2",
+        "Api": "CreateVolume",
+        "AvailabilityZone": "{{describeVolume.availabilityZone}}",
+        "SnapshotId": "{{createSnapshot.snapshotId}}",
+        "VolumeType": "{{describeVolume.volumeType}}",
+        "Size": "{{describeVolume.size}}",
+        "Iops": "{{describeVolume.iops}}",
+        "Encrypted": true,
+        "KmsKeyId": "{{KmsKeyId}}"
+      },
+      "outputs": [
+        {
+          "Name": "volumeId",
+          "Selector": "$.VolumeId"
+        }
+      ]
+    },
+    {
+      "name": "waitForVolume",
+      "action": "aws:waitForAwsResourceProperty",
+      "inputs": {
+        "Service": "ec2",
+        "Api": "DescribeVolumes",
+        "VolumeIds": ["{{createEncryptedVolume.volumeId}}"],
+        "PropertySelector": "$.Volumes[0].State",
+        "DesiredValues": ["available"]
+      }
+    }
+  ]
+}

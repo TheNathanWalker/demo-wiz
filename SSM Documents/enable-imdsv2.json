@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "0.3",
+  "assumeRole": "{{AutomationAssumeRole}}",
+  "parameters": {
+    "InstanceId": {
+      "type": "String",
+      "description": "The ID of the EC2 instance to enable IMDSv2"
+    },
+    "AutomationAssumeRole": {
+      "type": "String",
+      "description": "The ARN of the role that allows Automation to perform the actions on your behalf"
+    }
+  },
+  "mainSteps": [
+    {
+      "name": "enableIMDSv2",
+      "action": "aws:executeAwsApi",
+      "inputs": {
+        "Service": "ec2",
+        "Api": "ModifyInstanceMetadataOptions",
+        "InstanceId": "{{InstanceId}}",
+        "HttpTokens": "required",
+        "HttpEndpoint": "enabled"
+      }
+    },
+    {
+      "name": "verifyIMDSv2",
+      "action": "aws:executeAwsApi",
+      "inputs": {
+        "Service": "ec2",
+        "Api": "DescribeInstanceMetadataOptions",
+        "InstanceId": "{{InstanceId}}"
+      },
+      "outputs": [
+        {
+          "Name": "HttpTokens",
+          "Selector": "$.MetadataOptions.HttpTokens"
+        }
+      ]
+    },
+    {
+      "name": "verifyCompliance",
+      "action": "aws:assertAwsResourceProperty",
+      "inputs": {
+        "Service": "ec2",
+        "Api": "DescribeInstanceMetadataOptions",
+        "InstanceId": "{{InstanceId}}",
+        "PropertySelector": "$.MetadataOptions.HttpTokens",
+        "DesiredValues": ["required"]
+      }
+    }
+  ],
+  "outputs": [
+    "verifyIMDSv2.HttpTokens"
+  ]
+}
