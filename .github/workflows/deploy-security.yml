@@ -30,7 +30,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
-      - name: Deploy the CloudFormation stack
+      - name: Deploy a CloudFormation stack
         id: deploy
         run: |
           aws cloudformation deploy \
