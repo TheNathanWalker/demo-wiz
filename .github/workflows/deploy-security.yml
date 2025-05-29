@@ -30,14 +30,21 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
-      - name: Deploy to CloudFormation stack
+      - name: Deploy CloudFormation stack
         id: deploy
-        uses: aws-actions/aws-cloudformation-github-deploy@v1
-        with:
-          name: tasky-security
-          template: cfn/cfn-cf-waf-shield.yaml
-          no-fail-on-empty-changeset: "1"
-          parameter-overrides: >-
-            AlbDnsName=${{ secrets.ALB_ENDPOINT }},
-            ExistingS3BucketName=${{ secrets.S3_BUCKET_NAME }},
-            EnableGuardDuty=true
+        run: |
+          aws cloudformation deploy \
+            --template-file cfn/cfn-cf-waf-shield.yaml \
+            --stack-name tasky-security \
+            --parameter-overrides \
+              AlbDnsName=${{ secrets.ALB_ENDPOINT }} \
+              ExistingS3BucketName=${{ secrets.S3_BUCKET_NAME }} \
+              EnableGuardDuty=true \
+            --no-fail-on-empty-changeset
+
+      - name: Get CloudFront domain
+        if: success()
+        run: |
+          CF_DOMAIN=$(aws cloudformation describe-stacks --stack-name tasky-security --query "Stacks[0].Outputs[?OutputKey=='CloudFrontDomain'].OutputValue" --output text)
+          echo "CloudFront domain: $CF_DOMAIN"
+          echo "CLOUDFRONT_DOMAIN=$CF_DOMAIN" >> $GITHUB_ENV
