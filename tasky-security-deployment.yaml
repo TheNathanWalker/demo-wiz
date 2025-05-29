@@ -1,0 +1,6 @@
+template-file-path: cfn/cfn-cf-waf-shield.yaml
+parameters:
+  ALB_ENDPOINT: app-alb-16610519.us-east-1.elb.amazonaws.com
+  S3_BUCKET_NAME: tasky-demo-mongobackupbucket-ys8zfqzitvpi
+  EnableGuardDuty: 'true'
+tags: {}
