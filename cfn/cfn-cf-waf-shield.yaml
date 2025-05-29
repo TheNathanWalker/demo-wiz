@@ -20,7 +20,7 @@ Conditions:
   EnableGuardDutyCondition: !Equals [!Ref EnableGuardDuty, "true"]
 
 Resources:
-  # WAF Web ACL with enhanced rules for EKS and MongoDB
+  # WAF Web ACL with enhanced rules for EKS and MongoDB instance
   WebACL:
     Type: AWS::WAFv2::WebACL
     Properties:
