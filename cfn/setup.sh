@@ -136,4 +136,78 @@ cat > /tmp/mongodb-connection.txt << EOF
 mongodb://$ADMIN_USERNAME:$ADMIN_PASSWORD@$(hostname -I | awk '{print $1}'):27017/tasky?authSource=admin
 EOF
 
+# Install AWS CLI
+dnf install -y aws-cli
+
+# Create backup directory
+mkdir -p /opt/mongodb/backup
+
+# Create backup script
+cat > /opt/mongodb/backup/mongodb-backup.sh << 'EOF'
+#!/bin/bash
+set -e
+
+# MongoDB backup script
+
+# Get credentials from secure file
+ADMIN_USERNAME=$(grep "MongoDB Admin Username" /root/.mongodb_credentials | cut -d' ' -f4)
+ADMIN_PASSWORD=$(grep "MongoDB Admin Password" /root/.mongodb_credentials | cut -d' ' -f4)
+
+# Get S3 bucket name from instance metadata
+TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)
+REGION=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/region)
+S3_BUCKET=$(aws cloudformation describe-stacks --region $REGION --query "Stacks[?Outputs[?OutputKey=='MongoBackupBucketName']].Outputs[?OutputKey=='MongoBackupBucketName'].OutputValue" --output text)
+SNS_TOPIC=$(aws cloudformation describe-stacks --region $REGION --query "Stacks[?Outputs[?OutputKey=='MongoBackupNotificationTopicArn']].Outputs[?OutputKey=='MongoBackupNotificationTopicArn'].OutputValue" --output text)
+
+# Set backup directory and filename
+BACKUP_DIR="/tmp/mongodb_backup"
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+BACKUP_FILENAME="mongodb_backup_$TIMESTAMP"
+S3_PATH="backups/$BACKUP_FILENAME"
+
+# Create backup directory if it doesn't exist
+mkdir -p $BACKUP_DIR
+
+# Perform MongoDB backup
+echo "Starting MongoDB backup..."
+mongodump --host localhost --port 27017 --username $ADMIN_USERNAME --password $ADMIN_PASSWORD --authenticationDatabase admin --out $BACKUP_DIR/$BACKUP_FILENAME
+
+# Compress backup
+echo "Compressing backup..."
+tar -czf $BACKUP_DIR/$BACKUP_FILENAME.tar.gz -C $BACKUP_DIR $BACKUP_FILENAME
+
+# Upload to S3
+echo "Uploading to S3..."
+if aws s3 cp $BACKUP_DIR/$BACKUP_FILENAME.tar.gz s3://$S3_BUCKET/$S3_PATH.tar.gz; then
+    echo "Backup successfully uploaded to S3"
+    aws sns publish --topic-arn $SNS_TOPIC --message "MongoDB backup successful: s3://$S3_BUCKET/$S3_PATH.tar.gz" --subject "MongoDB Backup Success"
+    EXIT_CODE=0
+else
+    echo "Failed to upload backup to S3"
+    aws sns publish --topic-arn $SNS_TOPIC --message "MongoDB backup failed: Error uploading to S3" --subject "MongoDB Backup Failure"
+    EXIT_CODE=1
+fi
+
+# Clean up
+echo "Cleaning up temporary files..."
+rm -rf $BACKUP_DIR/$BACKUP_FILENAME
+rm -f $BACKUP_DIR/$BACKUP_FILENAME.tar.gz
+
+# Keep only the last 7 days of backups locally
+find $BACKUP_DIR -name "mongodb_backup_*.tar.gz" -type f -mtime +7 -delete
+
+exit $EXIT_CODE
+EOF
+
+# Make backup script executable
+chmod +x /opt/mongodb/backup/mongodb-backup.sh
+
+# Set up cron job for daily backups at 2 AM
+echo "0 2 * * * root /opt/mongodb/backup/mongodb-backup.sh > /var/log/mongodb-backup.log 2>&1" > /etc/cron.d/mongodb-backup
+chmod 644 /etc/cron.d/mongodb-backup
+
+# Run initial backup
+/opt/mongodb/backup/mongodb-backup.sh > /var/log/mongodb-backup-initial.log 2>&1 || true
+
 echo "MongoDB setup complete" > /var/log/mongodb-setup-complete.log

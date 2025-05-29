@@ -397,6 +397,13 @@ Resources:
           echo "Bootstrap script completed" > /var/log/bootstrap-complete.log
 
 
+  # SNS Topic for Backup Notifications
+  MongoBackupNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: MongoDB Backup Notifications
+      TopicName: mongodb-backup-notifications
+
   # IAM Role for MongoDB EC2 to access S3
   MongoDBInstanceRole:
     Type: AWS::IAM::Role
@@ -420,9 +427,15 @@ Resources:
                 Action:
                   - s3:PutObject
                   - s3:ListBucket
+                  - s3:GetObject
                 Resource:
                   - !GetAtt MongoBackupBucket.Arn
                   - !Sub "${MongoBackupBucket.Arn}/*"
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource:
+                  - !Ref MongoBackupNotificationTopic
 
   MongoDBInstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -435,6 +448,12 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       AccessControl: Private
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldBackups
+            Status: Enabled
+            ExpirationInDays: 30
+            Prefix: "backups/"
 
 Outputs:
   ALBEndpoint:
@@ -452,6 +471,9 @@ Outputs:
   MongoBackupBucketName:
     Description: "MongoDB Backup S3 Bucket"
     Value: !Ref MongoBackupBucket
+  MongoBackupNotificationTopicArn:
+    Description: "MongoDB Backup Notification SNS Topic ARN"
+    Value: !Ref MongoBackupNotificationTopic
   EC2InstanceConnectEndpointId:
     Description: "EC2 Instance Connect Endpoint ID"
     Value: !Ref EC2InstanceConnectEndpoint
