@@ -1,0 +1,23 @@
+image:
+  repository: "${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/tasky"
+  tag: "latest"
+
+mongodb:
+  host: "${MONGO_IP}"
+  port: 27017
+  username: "${ADMIN_USERNAME}"
+  password: "${ADMIN_PASSWORD}"
+  database: "tasky"
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+ingress:
+  enabled: true
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+
