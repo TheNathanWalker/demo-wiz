@@ -162,30 +162,32 @@ Resources:
         ResponseHeadersPolicy:
           ResponseHeadersPolicyId: !GetAtt SecurityHeadersPolicy.Id
 
-  # Security Headers Policy
-  SecurityHeadersPolicy:
-    Type: AWS::CloudFront::ResponseHeadersPolicy
-    Properties:
-      ResponseHeadersPolicyConfig:
-        Name: TaskySecurityHeaders
-        SecurityHeadersConfig:
-          ContentSecurityPolicy:
-            Override: true
-            ContentSecurityPolicy: "default-src 'self'; script-src 'self'; object-src 'none'; frame-ancestors 'none'"
-          StrictTransportSecurity:
-            Override: true
-            AccessControlMaxAgeSec: 31536000
-            IncludeSubdomains: true
-            Preload: true
-          XContentTypeOptions:
-            Override: true
-          XFrameOptions:
-            Override: true
-            XFrameOption: DENY
-          XSSProtection:
-            Override: true
-            Protection: true
-            ModeBlock: true
+# Security Headers Policy
+SecurityHeadersPolicy:
+  Type: AWS::CloudFront::ResponseHeadersPolicy
+  Properties:
+    ResponseHeadersPolicyConfig:
+      Name: TaskySecurityHeaders
+      SecurityHeadersConfig:
+        ContentSecurityPolicy:
+          Override: true
+          ContentSecurityPolicy: "default-src 'self'; script-src 'self'; object-src 'none'; frame-ancestors 'none'"
+        StrictTransportSecurity:
+          Override: true
+          AccessControlMaxAgeSec: 31536000
+          IncludeSubdomains: true
+          Preload: true
+        # Fix these two properties - they should be nested under SecurityHeadersConfig
+        FrameOptions:
+          FrameOption: DENY
+          Override: true
+        ContentTypeOptions:
+          Override: true
+        XSSProtection:
+          Override: true
+          Protection: true
+          ModeBlock: true
+
 
   # GuardDuty Detector with all protection plans
   GuardDutyDetector:
@@ -199,20 +201,9 @@ Resources:
         Kubernetes:
           AuditLogs:
             Enable: true
-        Malware:
-          ScanEc2InstanceWithFindings:
-            EbsVolumes: true
-          ScanS3BucketWithFindings:
-            Enable: true
 
-  # GuardDuty S3 Protection for the backup bucket
-  S3ProtectionConfiguration:
-    Type: AWS::GuardDuty::DetectorS3LogsConfiguration
-    Condition: EnableGuardDutyCondition
-    Properties:
-      DetectorId: !Ref GuardDutyDetector
-      BucketNames:
-        - !Ref ExistingS3BucketName
+
+
 
   # CloudWatch Alarm for high request rates
   HighRequestRateAlarm:

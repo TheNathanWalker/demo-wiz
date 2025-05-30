@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Step 0: Verify CloudFormation stack status
-echo "Step 0: Verifying CloudFormation stack status..."
+# Verify CloudFormation stack status
+echo "Verifying CloudFormation stack status..."
 STACK_NAME="tasky-demo"
 STACK_STATUS=$(aws cloudformation describe-stacks --stack-name $STACK_NAME --query "Stacks[0].StackStatus" --output text)
 
@@ -17,7 +17,7 @@ echo "Getting MongoDB private IP from CloudFormation stack..."
 MONGO_IP=$(aws cloudformation describe-stacks --stack-name $STACK_NAME --query "Stacks[0].Outputs[?OutputKey=='MongoDBPrivateIP'].OutputValue" --output text)
 CLUSTER_NAME=$(aws cloudformation describe-stacks --stack-name $STACK_NAME --query "Stacks[0].Outputs[?OutputKey=='EKSClusterName'].OutputValue" --output text)
 
-# Verify that we got valid outputs
+# Verify valid outputs
 if [ -z "$MONGO_IP" ] || [ -z "$CLUSTER_NAME" ]; then
   echo "ERROR: Failed to retrieve required outputs from CloudFormation stack"
   echo "MongoDB IP: $MONGO_IP"
@@ -76,6 +76,7 @@ if ! command -v helm &> /dev/null; then
   ./EKS/get_helm.sh
 fi
 
+# Add AWS EKS Helm repository
 helm repo add eks https://aws.github.io/eks-charts
 helm repo update
 
@@ -102,7 +103,7 @@ kubectl -n kube-system wait --for=condition=available --timeout=90s deployment/a
 
 # Apply Kubernetes resources
 echo "Applying Kubernetes resources..."
-kubectl apply -f EKS/tasky-mongodb.yaml
+#kubectl apply -f EKS/tasky-mongodb.yaml
 kubectl apply -f EKS/service.yaml
 kubectl apply -f EKS/ingress.yaml
 

@@ -1,0 +1,190 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: CloudFront and WAF for existing ALB-based application
+
+Parameters:
+  AlbDnsName:
+    Type: String
+    Description: DNS name of the existing ALB
+    Default: k8s-default-taskying-39c2861c98-1448398186.us-east-1.elb.amazonaws.com
+
+  EnvironmentName:
+    Type: String
+    Description: Environment name for resource tagging
+    Default: tasky-demo
+
+Resources:
+  # WAF Web ACL for CloudFront
+  WafWebAcl:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: !Sub "${EnvironmentName}-cloudfront-waf"
+      Scope: CLOUDFRONT
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: !Sub "${EnvironmentName}-cloudfront-waf-metrics"
+      Rules:
+        # AWS Managed Core Rule Set
+        - Name: AWS-AWSManagedRulesCommonRuleSet
+          Priority: 0
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWS-AWSManagedRulesCommonRuleSet
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+              ExcludedRules: []
+        
+        # SQL Injection Protection
+        - Name: AWS-AWSManagedRulesSQLiRuleSet
+          Priority: 1
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWS-AWSManagedRulesSQLiRuleSet
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesSQLiRuleSet
+              ExcludedRules: []
+        
+        # Known Bad Inputs Protection
+        - Name: AWS-AWSManagedRulesKnownBadInputsRuleSet
+          Priority: 2
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWS-AWSManagedRulesKnownBadInputsRuleSet
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesKnownBadInputsRuleSet
+              ExcludedRules: []
+        
+        # Rate Limiting Rule
+        - Name: RateLimitRule
+          Priority: 3
+          Action:
+            Block: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: RateLimitRule
+          Statement:
+            RateBasedStatement:
+              Limit: 1000
+              AggregateKeyType: IP
+
+  # Origin Request Policy with necessary headers
+  OriginRequestPolicy:
+    Type: AWS::CloudFront::OriginRequestPolicy
+    Properties:
+      OriginRequestPolicyConfig:
+        Name: !Sub "${EnvironmentName}-alb-origin-policy"
+        CookiesConfig:
+          CookieBehavior: all
+        HeadersConfig:
+          HeaderBehavior: whitelist
+          Headers:
+            - Host
+            - Origin
+            - Referer
+            - Accept
+            - Accept-Language
+            - Authorization
+        QueryStringsConfig:
+          QueryStringBehavior: all
+
+
+  # CloudFront Cache Policy
+  CachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: !Sub "${EnvironmentName}-alb-cache-policy"
+        DefaultTTL: 86400
+        MaxTTL: 31536000
+        MinTTL: 1
+        ParametersInCacheKeyAndForwardedToOrigin:
+          CookiesConfig:
+            CookieBehavior: all
+          EnableAcceptEncodingGzip: true
+          EnableAcceptEncodingBrotli: true
+          HeadersConfig:
+            HeaderBehavior: whitelist
+            Headers:
+              - Authorization
+              - Host
+          QueryStringsConfig:
+            QueryStringBehavior: all
+
+  # CloudFront Distribution
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub "${EnvironmentName} CloudFront Distribution"
+        DefaultRootObject: "/"
+        HttpVersion: http2
+        PriceClass: PriceClass_100
+        WebACLId: !GetAtt WafWebAcl.Arn
+        Origins:
+          - Id: AlbOrigin
+            DomainName: !Ref AlbDnsName
+            CustomOriginConfig:
+              HTTPPort: 80
+              HTTPSPort: 443
+              OriginProtocolPolicy: http-only
+              OriginSSLProtocols:
+                - TLSv1.2
+            OriginCustomHeaders:
+              - HeaderName: X-Forwarded-Proto
+                HeaderValue: https
+        DefaultCacheBehavior:
+          TargetOriginId: AlbOrigin
+          ViewerProtocolPolicy: redirect-to-https
+          CachePolicyId: !Ref CachePolicy
+          OriginRequestPolicyId: !Ref OriginRequestPolicy
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+            - PUT
+            - POST
+            - PATCH
+            - DELETE
+          CachedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          Compress: true
+        Logging:
+          Bucket: ""
+          Prefix: ""
+          IncludeCookies: false
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+
+Outputs:
+  CloudFrontDomainName:
+    Description: "CloudFront Distribution Domain Name"
+    Value: !GetAtt CloudFrontDistribution.DomainName
+  
+  WafWebAclId:
+    Description: "WAF Web ACL ID"
+    Value: !Ref WafWebAcl
+  
+  WafWebAclArn:
+    Description: "WAF Web ACL ARN"
+    Value: !GetAtt WafWebAcl.Arn
