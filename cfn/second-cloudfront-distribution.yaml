@@ -99,7 +99,7 @@ Resources:
     Type: AWS::CloudFront::Distribution
     Properties:
       DistributionConfig:
-        Comment: "CloudFront Distribution with WAF"
+        Comment: "CloudFront Distribution with WAF and Shield Standard"
         DefaultRootObject: ""
         Enabled: true
         HttpVersion: http2
