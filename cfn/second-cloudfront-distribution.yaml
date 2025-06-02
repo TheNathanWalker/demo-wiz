@@ -1,0 +1,169 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "CloudFormation template for CloudFront distribution with WAF and Shield Standard protection"
+
+Parameters:
+  AlbDnsName:
+    Type: String
+    Description: DNS name of the existing ALB
+    Default: k8s-default-taskying-39c2861c98-1448398186.us-east-1.elb.amazonaws.com
+
+Resources:
+  # WAF Web ACL for CloudFront
+  WebACL:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: "cf-distribution-waf"
+      Scope: CLOUDFRONT
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: CloudFrontWAF
+      Rules:
+        # Core rule set - general protection
+        - Name: AWSManagedRulesCommonRuleSet
+          Priority: 0
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedRulesCommonRuleSet
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+        
+        # SQL Injection protection for MongoDB
+        - Name: AWSManagedRulesSQLiRuleSet
+          Priority: 1
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedRulesSQLiRuleSet
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesSQLiRuleSet
+        
+        # NoSQL injection protection for MongoDB
+        - Name: NoSQLInjectionProtection
+          Priority: 2
+          Action:
+            Block: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: NoSQLInjectionProtection
+          Statement:
+            RegexPatternSetReferenceStatement:
+              ARN: !GetAtt NoSQLInjectionPatternSet.Arn
+              FieldToMatch:
+                Body: {}
+              TextTransformations:
+                - Priority: 0
+                  Type: URL_DECODE
+        
+        # Rate limiting to prevent brute force attacks
+        - Name: RateLimitRule
+          Priority: 3
+          Action:
+            Block: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: RateLimitRule
+          Statement:
+            RateBasedStatement:
+              Limit: 1000
+              AggregateKeyType: IP
+
+  # Pattern set for NoSQL injection protection
+  NoSQLInjectionPatternSet:
+    Type: AWS::WAFv2::RegexPatternSet
+    Properties:
+      Scope: CLOUDFRONT
+      Description: "Patterns to detect NoSQL injection attacks"
+      RegularExpressionList:
+        - "\\$where\\s*:\\s*function"
+        - "\\$\\$\\s*\\{.*\\}"
+        - "\\$gt\\s*:|\\$lt\\s*:|\\$gte\\s*:|\\$lte\\s*:"
+        - "\\$exists\\s*:|\\$type\\s*:|\\$or\\s*:\\s*\\[|\\$and\\s*:\\s*\\["
+        - "\\$regex\\s*:|\\$options\\s*:"
+
+  # CloudFront Distribution with WAF
+  SecondCloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: "CloudFront Distribution with WAF"
+        DefaultRootObject: ""
+        Enabled: true
+        HttpVersion: http2
+        IPV6Enabled: true
+        PriceClass: PriceClass_100
+        WebACLId: !GetAtt WebACL.Arn
+        Origins:
+          - Id: AlbOrigin
+            DomainName: !Ref AlbDnsName
+            CustomOriginConfig:
+              HTTPPort: 80
+              HTTPSPort: 443
+              OriginProtocolPolicy: http-only
+              OriginSSLProtocols:
+                - TLSv1.2
+              OriginReadTimeout: 30
+              OriginKeepaliveTimeout: 5
+            ConnectionAttempts: 3
+            ConnectionTimeout: 10
+        DefaultCacheBehavior:
+          TargetOriginId: AlbOrigin
+          ViewerProtocolPolicy: https-only
+          AllowedMethods:
+            - HEAD
+            - DELETE
+            - POST
+            - GET
+            - OPTIONS
+            - PUT
+            - PATCH
+          CachedMethods:
+            - HEAD
+            - GET
+            - OPTIONS
+          SmoothStreaming: false
+          Compress: true
+          ForwardedValues:
+            QueryString: true
+            Cookies:
+              Forward: all
+            Headers: []
+          MinTTL: 0
+          DefaultTTL: 0
+          MaxTTL: 0
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+          MinimumProtocolVersion: TLSv1
+        Restrictions:
+          GeoRestriction:
+            RestrictionType: none
+
+Outputs:
+  SecondCloudFrontDomainName:
+    Description: "CloudFront Distribution Domain Name"
+    Value: !GetAtt SecondCloudFrontDistribution.DomainName
+  
+  SecondCloudFrontDistributionId:
+    Description: "CloudFront Distribution ID"
+    Value: !Ref SecondCloudFrontDistribution
+    
+  WebACLId:
+    Description: "WAF Web ACL ID"
+    Value: !Ref WebACL
+    
+  ShieldProtectionInfo:
+    Description: "Shield Protection Status"
+    Value: "Shield Standard enabled (included by default)"

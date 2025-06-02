@@ -1,0 +1,33 @@
+name: Deploy CloudFront Distribution
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'cfn/second-cloudfront-distribution.yaml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Deploy CloudFormation stack
+        run: |
+          aws cloudformation deploy \
+            --template-file cfn/second-cloudfront-distribution.yaml \
+            --stack-name second-cloudfront-distribution \
+            --capabilities CAPABILITY_IAM \
+            --no-fail-on-empty-changeset
