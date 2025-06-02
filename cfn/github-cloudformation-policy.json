@@ -11,6 +11,7 @@
         "cloudformation:DescribeChangeSet",
         "cloudformation:ExecuteChangeSet",
         "cloudformation:DeleteChangeSet",
+        "cloudformation:GetTemplateSummary",
         "cloudfront:*",
         "wafv2:*",
         "iam:PassRole"
